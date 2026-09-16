@@ -34,6 +34,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.live && 'true' || 'false' }}
+      STATE_FILE: ${{ runner.temp }}/bluesky-state/state.json
       MAX_REPLIES_PER_RUN: '2'
       MAX_FOLLOWS_PER_RUN: '2'
       MAX_LIKES_PER_RUN: '3'
@@ -52,6 +53,14 @@ jobs:
         run: |
           python --version
           pip --version
+      - name: Restore engagement memory
+        if: ${{ !((github.event_name == 'workflow_dispatch' && inputs.mode == 'post') || (github.event_name == 'schedule' && startsWith(github.event.schedule, '17 13'))) }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/bluesky-state
+          key: bluesky-state-${{ github.run_id }}
+          restore-keys: |
+            bluesky-state-
       - name: Engage or post
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "post" ]; then
@@ -59,5 +68,12 @@ jobs:
           elif [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%H)" = "13" ]; then
             python post.py
           else
+            mkdir -p "$(dirname "$STATE_FILE")"
             python agent.py
           fi
+      - name: Save engagement memory
+        if: ${{ success() && !((github.event_name == 'workflow_dispatch' && inputs.mode == 'post') || (github.event_name == 'schedule' && startsWith(github.event.schedule, '17 13'))) }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bluesky-state
+          key: bluesky-state-${{ github.run_id }}
