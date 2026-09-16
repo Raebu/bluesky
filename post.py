@@ -1,4 +1,4 @@
-"""Publish a useful original Bluesky post with durable Google Sheets memory."""
+"""Publish a useful original Bluesky post with durable memory and learning."""
 import io,json,os,re,hashlib
 from pathlib import Path
 from atproto import Client,models
@@ -6,15 +6,15 @@ from openai import OpenAI
 from PIL import Image,ImageDraw,ImageFont
 from voice import MARTIN_VOICE
 from intelligence import load_knowledge,is_duplicate,content_mix_prompt,reputation_gate_prompt
+from network_intelligence import performance_summary,series_context,self_critique_prompt
 import gdrive_memory as gm
-HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link"); DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true"; STATE_FILE=Path(os.getenv("STATE_FILE","state.json"))
+HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"))
 SYSTEM=MARTIN_VOICE+r'''\nReturn ONLY valid JSON: {"text":"post","hashtags":[],"media":"none|insight_card|process_card|contrast_card","card_title":"","card_points":[],"alt_text":"","thread":[]}\nRULES: hashtags optional, 0-2 and only for discovery. Final main post <=300 chars. Media must add information, never generic decoration. thread normally empty; use 2-4 continuations only when genuinely useful. Never invent personal experience, clients, projects, transactions, outcomes, statistics or product use.'''
 def load_state():
  try:return json.loads(STATE_FILE.read_text())
  except:return {}
 def save_state(s):STATE_FILE.parent.mkdir(parents=True,exist_ok=True);STATE_FILE.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
-def clean_tag(t):
- t=re.sub(r"[^A-Za-z0-9_]","",str(t).lstrip("#"));return f"#{t}" if t else None
+def clean_tag(t):t=re.sub(r"[^A-Za-z0-9_]","",str(t).lstrip("#"));return f"#{t}" if t else None
 def fit_post(text,tags):
  text=re.sub(r"\s+"," ",text).strip();clean=[]
  for x in tags[:2]:
@@ -47,14 +47,19 @@ def make_card(title,points,kind):
 def ai_json(ai,prompt):
  r=ai.responses.create(model=os.getenv("OPENAI_MODEL","gpt-5-mini"),input=prompt);raw=re.sub(r"^```(?:json)?\s*|\s*```$","",r.output_text.strip(),flags=re.I|re.S);return json.loads(raw)
 def main():
- ai=OpenAI(api_key=os.environ["OPENAI_API_KEY"]);state=load_state();local=load_knowledge();sheetfacts=gm.verified_knowledge() if gm.enabled() else [];knowledge={"repository":local,"google_sheet_verified_facts":sheetfacts};topic=content_mix_prompt(state)
+ ai=OpenAI(api_key=os.environ["OPENAI_API_KEY"]);state=load_state();local=load_knowledge();sheetfacts=gm.verified_knowledge() if gm.enabled() else [];knowledge={"repository":local,"google_sheet_verified_facts":sheetfacts};topic=content_mix_prompt(state);performance=performance_summary();series=series_context()
  recent=list(dict.fromkeys((gm.recent_posts(100) if gm.enabled() else [])+state.get("original_posts",[])))[-100:];plan=None;text=""
  for _ in range(3):
-  plan=ai_json(ai,SYSTEM+f"\nTASK\nCreate one original post. Content lane: {topic}. Verified knowledge: {json.dumps(knowledge)}. Recent posts to avoid repeating: {json.dumps(recent[-20:])}. Prefer a fresh mechanism, trade-off or useful observation.");text=fit_post(str(plan.get("text","")),list(plan.get("hashtags") or []))
+  task=f"Create one original post. Content lane: {topic}. Verified knowledge: {json.dumps(knowledge)}. Existing intellectual series: {series or 'none yet'}. Performance evidence: {performance}. Use performance only as weak evidence about useful formats/topics; never chase engagement or invent conclusions from sparse data. If this lane has prior posts, advance the argument rather than restating it. Recent posts: {json.dumps(recent[-20:])}. Prefer a fresh mechanism, constraint, trade-off or second-order implication."
+  plan=ai_json(ai,SYSTEM+"\nTASK\n"+task);text=fit_post(str(plan.get("text","")),list(plan.get("hashtags") or []))
   if text and not is_duplicate(text,recent):break
   if gm.enabled() and text:gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected","semantic duplicate")
   plan=None
  if not plan or not text:return print("SKIP duplicate/weak post")
+ critique=ai_json(ai,MARTIN_VOICE+"\n"+self_critique_prompt(text))
+ if not critique or critique.get("pass") is not True:
+  if gm.enabled():gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected",(critique or {}).get("reason","self critique"))
+  return print("SKIP self critique")
  gate=ai_json(ai,MARTIN_VOICE+"\n"+reputation_gate_prompt(text,knowledge))
  if gate.get("publish") is not True:
   if gm.enabled():gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected",gate.get("reason","reputation gate"))
