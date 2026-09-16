@@ -1,0 +1,51 @@
+name: Bluesky Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run mode
+        required: true
+        default: engagement
+        type: choice
+        options: [engagement, post]
+      live:
+        description: Perform live Bluesky writes
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: '17 8,13,18 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BSKY_HANDLE: mraeburn.link
+      BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.live && 'true' || 'false' }}
+      MAX_REPLIES_PER_RUN: '2'
+      MAX_FOLLOWS_PER_RUN: '2'
+      MAX_LIKES_PER_RUN: '3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Engage or post
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "post" ]; then
+            python post.py
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%H)" = "13" ]; then
+            python post.py
+          else
+            python agent.py
+          fi
