@@ -22,8 +22,8 @@ def ai_json(prompt):
 def safe_text(t):return re.sub(r"\s+"," ",t or "").strip()[:600]
 def complete_reply(prompt):
  for attempt in range(3):
-  suffix=f"\nWrite ONE concise, complete response of no more than {REPLY_LIMIT} characters total. Prefer 1 sentence; use 2 only if genuinely necessary. Make one useful point, not several. It MUST end at a natural sentence boundary. Never cut a sentence short. Output only the reply or exactly NO_REPLY."
-  if attempt:suffix+=" Previous attempt was too long or incomplete; make this version materially shorter."
+  suffix=f"\nWrite ONE concise, complete response of no more than {REPLY_LIMIT} characters total. The goal is genuine two-way professional conversation, not broadcasting. Prefer: one specific observation + one natural, easy-to-answer question. If a question would be forced, use a conversational statement that clearly leaves room for response. Ask about the author's reasoning, implementation, trade-off, evidence or experience when appropriate. Never ask a generic engagement-bait question such as 'Thoughts?'. Prefer 1-2 short sentences. Make one useful point, not several. It MUST end at a natural sentence boundary. Never cut a sentence short. Output only the reply or exactly NO_REPLY."
+  if attempt:suffix+=" Previous attempt was too long or incomplete; make this version materially shorter while preserving the conversational opening."
   t=ai_raw(prompt+suffix).strip()
   if t.upper().startswith("NO_REPLY"):return None
   t=re.sub(r"\s+"," ",t)
@@ -35,7 +35,7 @@ def sheet_history(did):
  if not gm.enabled():return ""
  rs=gm.conversation_for(did);return "\n".join(f"- {r.get('Direction')}: {r.get('Their Text','')} => {r.get('Martin Reply','')}" for r in rs[-6:])
 def quality_decision(a,t,topic):
- return ai_json(f"Topic:{topic}\nAuthor:@{a.handle}\nDisplay name:{getattr(a,'display_name','') or ''}\nPost:{t}\nReturn JSON only {{\"reply_worthy\":false,\"like\":false,\"follow\":false,\"reason\":\"\"}}. Apply a strict professional reputation filter BEFORE any engagement. reply_worthy=true only if Martin has a credible reason to enter this conversation and doing so improves his professional presence. Reject promotional product/bundle/course sales, affiliate-style content, spam, generic news/repost aggregators, engagement bait, low-information posts, suspicious accounts, rage bait, partisan political campaigning and contexts too weak to assess. A critical reply to promotional spam is still unnecessary engagement. like=true only for substantive relevant credible content. follow=true only for a worthwhile ongoing professional source or peer, not because one post is relevant. When uncertain set every action false.")
+ return ai_json(f"Topic:{topic}\nAuthor:@{a.handle}\nDisplay name:{getattr(a,'display_name','') or ''}\nPost:{t}\nReturn JSON only {{\"reply_worthy\":false,\"like\":false,\"follow\":false,\"reason\":\"\"}}. Apply a strict professional reputation filter BEFORE any engagement. reply_worthy=true only if Martin has a credible reason to enter this conversation, there is realistic scope for useful two-way dialogue, and doing so improves his professional presence. Prefer people and organisations likely to engage in substantive discussion. Reject promotional product/bundle/course sales, affiliate-style content, spam, generic news/repost aggregators, engagement bait, low-information posts, suspicious accounts, rage bait, partisan political campaigning and contexts too weak to assess. A critical reply to promotional spam is still unnecessary engagement. like=true only for substantive relevant credible content. follow=true only for a worthwhile ongoing professional source or peer, not because one post is relevant. When uncertain set every action false.")
 def process_inbound(c,me,s,block):
  done=set(s.get("inbound_seen",[]));count=0
  try:notes=c.app.bsky.notification.list_notifications({"limit":30}).notifications
@@ -46,7 +46,7 @@ def process_inbound(c,me,s,block):
   if {n.author.did.lower(),n.author.handle.lower(),"@"+n.author.handle.lower()}&block:done.add(n.uri);continue
   done.add(n.uri);txt=safe_text(getattr(n.record,"text",""));history=(sheet_history(n.author.did) or relationship_context(s,n.author.did));q=quality_decision(n.author,txt,"inbound mention/reply")
   if not q or q.get("reply_worthy") is not True:continue
-  reply=complete_reply(f"Inbound {n.reason} from @{n.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nReply only if substantive. Ignore generic praise, hostility, bait and political persuasion. Continue genuine context where relevant; never invent familiarity.")
+  reply=complete_reply(f"Inbound {n.reason} from @{n.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nContinue the conversation naturally if there is something substantive to add. Respond to what they actually said and, where useful, ask one specific follow-up that invites them to elaborate. Ignore generic praise, hostility, bait and political persuasion. Never invent familiarity.")
   if reply:
    print("INBOUND REPLY",n.author.handle,reply)
    if not DRY_RUN:
@@ -69,7 +69,7 @@ def main():
   if not d:continue
   print("FILTER",p.author.handle,d.get("reason",""))
   if replies<MAX_REPLIES and p.uri not in replied and d.get("reply_worthy") is True:
-   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nAdd one useful, specific point. Continue genuine context when relevant. No generic agreement, invented familiarity, partisan persuasion or engagement bait.")
+   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nEnter this as a conversation, not a mini-essay. Add one useful, specific observation and normally one relevant question that gives the author something concrete to answer. Continue genuine prior context when relevant. No generic agreement, invented familiarity, partisan persuasion or engagement bait.")
    if reply:
     print("REPLY",p.author.handle,reply)
     if not DRY_RUN:
