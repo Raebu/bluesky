@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from atproto import Client, models
+from voice import MARTIN_VOICE
 
 HANDLE = os.getenv("BSKY_HANDLE", "mraeburn.link")
 PASSWORD = os.environ["BSKY_APP_PASSWORD"]
@@ -17,12 +18,6 @@ TOPICS = [x.strip() for x in os.getenv(
 MAX_REPLIES = int(os.getenv("MAX_REPLIES_PER_RUN", "2"))
 MAX_FOLLOWS = int(os.getenv("MAX_FOLLOWS_PER_RUN", "2"))
 MAX_LIKES = int(os.getenv("MAX_LIKES_PER_RUN", "3"))
-
-VOICE = """You write as Martin Raeburn, Group Managing Director of The Raeburn Group.
-Focus: AI, automation, software, emerging technology, entrepreneurship and practical business building.
-British English. Clear, thoughtful, useful and concise. No hype, fake familiarity, engagement bait,
-political persuasion, invented claims, generic praise, hashtags-by-default, or pretending you read material
-that was not supplied. Replies must add a concrete observation or useful question."""
 
 
 def state_load():
@@ -40,8 +35,13 @@ def ai(prompt: str, max_chars=290):
     if not key: return None
     from openai import OpenAI
     c = OpenAI(api_key=key)
-    r = c.responses.create(model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), input=VOICE + "\n\n" + prompt)
+    r = c.responses.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+        input=MARTIN_VOICE + "\n\nTASK\n" + prompt,
+    )
     text = r.output_text.strip().replace("\r", "")
+    if text.upper().startswith("NO_REPLY"):
+        return None
     return text[:max_chars].rstrip()
 
 
@@ -74,7 +74,14 @@ def main():
     for p, txt, topic in candidates[:20]:
         seen.add(p.uri)
         if replies < MAX_REPLIES:
-            reply = ai(f"Topic: {topic}\nPost by @{p.author.handle}: {txt}\nWrite one natural Bluesky reply. Do not mention automation.")
+            reply = ai(
+                f"Topic discovered via search: {topic}\n"
+                f"Post by @{p.author.handle}: {txt}\n\n"
+                "Decide first whether Martin has a genuinely useful contribution. "
+                "If not, output exactly NO_REPLY. If yes, write one natural Bluesky reply only. "
+                "It should normally be 1-3 sentences and must add substance rather than generic agreement. "
+                "Do not mention automation or explain your decision."
+            )
             if reply:
                 print("REPLY", p.author.handle, reply)
                 if not DRY_RUN:
