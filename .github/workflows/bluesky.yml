@@ -1,5 +1,4 @@
 name: Bluesky Agent
-
 on:
   workflow_dispatch:
     inputs:
@@ -8,7 +7,7 @@ on:
         required: true
         default: engagement
         type: choice
-        options: [engagement, post, review]
+        options: [engagement, post, metrics, review]
       live:
         description: Perform live Bluesky writes
         required: true
@@ -16,15 +15,13 @@ on:
         type: boolean
   schedule:
     - cron: '17 8,13,18 * * *'
+    - cron: '45 20 * * *'
     - cron: '30 17 * * 0'
-
 permissions:
   contents: read
-
 concurrency:
   group: bluesky-agent
   cancel-in-progress: false
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -66,10 +63,14 @@ jobs:
           mkdir -p "$(dirname "$STATE_FILE")"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "review" ]; then
             python review.py
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "metrics" ]; then
+            python metrics.py
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "post" ]; then
             python post.py
           elif [ "${{ github.event.schedule }}" = "30 17 * * 0" ]; then
             python review.py
+          elif [ "${{ github.event.schedule }}" = "45 20 * * *" ]; then
+            python metrics.py
           elif [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%H)" = "13" ]; then
             python post.py
           else
