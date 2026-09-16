@@ -8,7 +8,7 @@ from voice import MARTIN_VOICE
 from intelligence import relationship_context,remember_relationship
 from network_intelligence import relationship_profile,discovery_topics
 import gdrive_memory as gm
-HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");PASSWORD=os.environ["BSKY_APP_PASSWORD"];DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"));MAX_REPLIES=int(os.getenv("MAX_REPLIES_PER_RUN","2"));MAX_FOLLOWS=int(os.getenv("MAX_FOLLOWS_PER_RUN","2"));MAX_LIKES=int(os.getenv("MAX_LIKES_PER_RUN","3"));MAX_INBOUND=int(os.getenv("MAX_INBOUND_REPLIES_PER_RUN","2"));REPLY_LIMIT=int(os.getenv("BSKY_REPLY_CHAR_LIMIT","220"))
+HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");PASSWORD=os.environ["BSKY_APP_PASSWORD"];DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"));MAX_REPLIES=int(os.getenv("MAX_REPLIES_PER_RUN","2"));MAX_FOLLOWS=int(os.getenv("MAX_FOLLOWS_PER_RUN","2"));MAX_LIKES=int(os.getenv("MAX_LIKES_PER_RUN","3"));MAX_INBOUND=int(os.getenv("MAX_INBOUND_REPLIES_PER_RUN","2"));REPLY_LIMIT=int(os.getenv("BSKY_REPLY_CHAR_LIMIT","220"));GENERIC_OPENING=re.compile(r"^(agree(?:d)?|exactly|absolutely|indeed|fair point|good point|great point|spot on|true|yes)\b[\s,.:;!—-]*",re.I)
 def state_load():
  try:return json.loads(STATE_FILE.read_text())
  except:return {"seen":[],"followed":[],"liked":[],"replied":[],"inbound_seen":[],"relationships":{}}
@@ -22,10 +22,11 @@ def ai_json(prompt):
 def safe_text(t):return re.sub(r"\s+"," ",t or "").strip()[:600]
 def complete_reply(prompt):
  for attempt in range(3):
-  suffix=f"\nWrite ONE concise, complete response <= {REPLY_LIMIT} characters. Goal: genuine two-way professional conversation. Prefer one educated, specific observation + one natural question about reasoning, implementation, evidence, incentives, constraints or trade-offs. No generic 'Thoughts?'. 1-2 short sentences; one useful point. End naturally. Output only reply or NO_REPLY."
-  if attempt:suffix+=" Make it materially shorter while preserving the conversational opening."
+  suffix=f"\nWrite ONE concise, complete response <= {REPLY_LIMIT} characters. Goal: genuine two-way professional conversation. Start directly with substance: NEVER open with Agree, Agreed, Exactly, Absolutely, Indeed, Fair point, Good point, Great point, Spot on, True, Yes, praise, or a restatement of the author's post. First address the CENTRAL CLAIM in the supplied post; only then introduce a technical angle if it materially sharpens that claim. Prefer one educated, specific distinction or mechanism + one natural question about reasoning, implementation, evidence, incentives, constraints or trade-offs. Avoid compressed slogan-like phrases and jargon piles. No generic 'Thoughts?'. 1-2 short sentences; one useful point. End naturally. Output only reply or NO_REPLY."
+  if attempt:suffix+=" Previous attempt failed a style or length check. Make it materially shorter, substance-first and more natural."
   t=re.sub(r"\s+"," ",ai_raw(prompt+suffix).strip())
   if t.upper().startswith("NO_REPLY"):return None
+  if GENERIC_OPENING.search(t):continue
   if len(t)<=REPLY_LIMIT and re.search(r"[.!?][\"')\]]?$",t):return t
  return None
 def blocked(block,p):return bool({p.author.did.lower(),p.author.handle.lower(),"@"+p.author.handle.lower()}&block)
@@ -33,7 +34,7 @@ def sheet_history(did):
  if not gm.enabled():return ""
  return "\n".join(f"- {r.get('Direction')}: {r.get('Their Text','')} => {r.get('Martin Reply','')}" for r in gm.conversation_for(did)[-6:])
 def quality_decision(a,t,topic,profile):
- return ai_json(f"Topic:{topic}\nAuthor:@{a.handle}\nDisplay name:{getattr(a,'display_name','') or ''}\nRelationship:{json.dumps(profile)}\nPost:{t}\nReturn JSON only {{\"reply_worthy\":false,\"like\":false,\"follow\":false,\"reason\":\"\"}}. Strict professional reputation filter. Prefer substantive two-way dialogue and, all else equal, recurring/established relationships over strangers. Existing relationship never overrides poor content. Reject promotional bundles/courses, affiliate content, spam, aggregators, bait, low-information posts, suspicious accounts, rage bait and partisan political campaigning. like only credible relevant substance; follow only worthwhile ongoing sources/peers. Uncertain=all false.")
+ return ai_json(f"Topic:{topic}\nAuthor:@{a.handle}\nDisplay name:{getattr(a,'display_name','') or ''}\nRelationship:{json.dumps(profile)}\nPost:{t}\nReturn JSON only {{\"reply_worthy\":false,\"like\":false,\"follow\":false,\"reason\":\"\"}}. Strict professional reputation filter. Prefer substantive two-way dialogue and, all else equal, recurring/established relationships over strangers. Existing relationship never overrides poor content. A reply is worthy only when Martin can engage the post's central claim directly rather than using it as a pretext for an adjacent technical observation. Reject promotional bundles/courses, affiliate content, spam, aggregators, bait, low-information posts, suspicious accounts, rage bait and partisan political campaigning. like only credible relevant substance; follow only worthwhile ongoing sources/peers. Uncertain=all false.")
 def process_inbound(c,me,s,block):
  done=set(s.get("inbound_seen",[]));count=0
  try:notes=c.app.bsky.notification.list_notifications({"limit":30}).notifications
@@ -44,7 +45,7 @@ def process_inbound(c,me,s,block):
   if {n.author.did.lower(),n.author.handle.lower(),"@"+n.author.handle.lower()}&block:done.add(n.uri);continue
   done.add(n.uri);txt=safe_text(getattr(n.record,"text",""));profile=relationship_profile(n.author.did);history=sheet_history(n.author.did) or relationship_context(s,n.author.did);q=quality_decision(n.author,txt,"inbound",profile)
   if not q or q.get("reply_worthy") is not True:continue
-  reply=complete_reply(f"Inbound {n.reason} from @{n.author.handle}: {txt}\nRelationship stage:{profile['stage']} score:{profile['score']}\nHistory:\n{history or '- none'}\nContinue the actual conversation. For recurring/established contacts, build on prior reasoning rather than resetting context. Ask one informed follow-up where useful.")
+  reply=complete_reply(f"Inbound {n.reason} from @{n.author.handle}: {txt}\nRelationship stage:{profile['stage']} score:{profile['score']}\nHistory:\n{history or '- none'}\nContinue the actual conversation. Address what they are principally saying before adding any adjacent expertise. For recurring/established contacts, build on prior reasoning rather than resetting context. Ask one informed follow-up where useful.")
   if reply:
    print("INBOUND REPLY",n.author.handle,profile,reply)
    if not DRY_RUN:
@@ -69,7 +70,7 @@ def main():
   if not d:continue
   print("FILTER",p.author.handle,profile,d.get("reason",""))
   if replies<MAX_REPLIES and p.uri not in replied and d.get("reply_worthy") is True:
-   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRelationship:{profile}\nHistory:\n{history or '- none'}\nEnter as a conversation, not a mini-essay. Add one educated observation and normally one concrete question. If recurring/established, continue the relationship's existing thread of thought.")
+   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRelationship:{profile}\nHistory:\n{history or '- none'}\nEnter as a conversation, not a mini-essay. Engage the post's central claim directly. Add one educated distinction, mechanism or implication that genuinely develops that claim, then normally one concrete question. Do not pivot to an adjacent technical topic merely because Martin knows about it. If recurring/established, continue the relationship's existing thread of thought.")
    if reply:
     print("REPLY",p.author.handle,reply)
     if not DRY_RUN:
