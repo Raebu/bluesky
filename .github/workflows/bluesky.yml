@@ -12,13 +12,17 @@ on:
       live:
         description: Perform live Bluesky writes
         required: true
-        default: false
+        default: true
         type: boolean
   schedule:
     - cron: '17 8,13,18 * * *'
 
 permissions:
   contents: read
+
+concurrency:
+  group: bluesky-agent
+  cancel-in-progress: false
 
 jobs:
   run:
