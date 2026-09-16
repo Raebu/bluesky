@@ -7,7 +7,7 @@ from atproto import Client,models
 from voice import MARTIN_VOICE
 from intelligence import relationship_context,remember_relationship
 import gdrive_memory as gm
-HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");PASSWORD=os.environ["BSKY_APP_PASSWORD"];DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"));TOPICS=[x.strip() for x in os.getenv("TOPICS","artificial intelligence,AI automation,enterprise software,technology leadership,entrepreneurship").split(",") if x.strip()];MAX_REPLIES=int(os.getenv("MAX_REPLIES_PER_RUN","2"));MAX_FOLLOWS=int(os.getenv("MAX_FOLLOWS_PER_RUN","2"));MAX_LIKES=int(os.getenv("MAX_LIKES_PER_RUN","3"));MAX_INBOUND=int(os.getenv("MAX_INBOUND_REPLIES_PER_RUN","2"));REPLY_LIMIT=int(os.getenv("BSKY_REPLY_CHAR_LIMIT","300"))
+HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");PASSWORD=os.environ["BSKY_APP_PASSWORD"];DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"));TOPICS=[x.strip() for x in os.getenv("TOPICS","artificial intelligence,AI automation,enterprise software,technology leadership,entrepreneurship").split(",") if x.strip()];MAX_REPLIES=int(os.getenv("MAX_REPLIES_PER_RUN","2"));MAX_FOLLOWS=int(os.getenv("MAX_FOLLOWS_PER_RUN","2"));MAX_LIKES=int(os.getenv("MAX_LIKES_PER_RUN","3"));MAX_INBOUND=int(os.getenv("MAX_INBOUND_REPLIES_PER_RUN","2"));REPLY_LIMIT=int(os.getenv("BSKY_REPLY_CHAR_LIMIT","220"))
 def state_load():
  try:return json.loads(STATE_FILE.read_text())
  except:return {"seen":[],"followed":[],"liked":[],"replied":[],"inbound_seen":[],"relationships":{}}
@@ -22,8 +22,8 @@ def ai_json(prompt):
 def safe_text(t):return re.sub(r"\s+"," ",t or "").strip()[:600]
 def complete_reply(prompt):
  for attempt in range(3):
-  suffix=f"\nWrite a complete response of no more than {REPLY_LIMIT} characters. It MUST end at a natural sentence boundary. Never cut a sentence short. Output only the reply or exactly NO_REPLY."
-  if attempt:suffix+=f" Previous attempt was too long or incomplete; make this version materially shorter."
+  suffix=f"\nWrite ONE concise, complete response of no more than {REPLY_LIMIT} characters total. Prefer 1 sentence; use 2 only if genuinely necessary. Make one useful point, not several. It MUST end at a natural sentence boundary. Never cut a sentence short. Output only the reply or exactly NO_REPLY."
+  if attempt:suffix+=" Previous attempt was too long or incomplete; make this version materially shorter."
   t=ai_raw(prompt+suffix).strip()
   if t.upper().startswith("NO_REPLY"):return None
   t=re.sub(r"\s+"," ",t)
@@ -69,7 +69,7 @@ def main():
   if not d:continue
   print("FILTER",p.author.handle,d.get("reason",""))
   if replies<MAX_REPLIES and p.uri not in replied and d.get("reply_worthy") is True:
-   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nAdd substance in 1-3 natural sentences. Continue genuine context when relevant. No generic agreement, invented familiarity, partisan persuasion or engagement bait.")
+   reply=complete_reply(f"Topic:{topic}\nPost by @{p.author.handle}: {txt}\nRemembered history:\n{history or '- none'}\nAdd one useful, specific point. Continue genuine context when relevant. No generic agreement, invented familiarity, partisan persuasion or engagement bait.")
    if reply:
     print("REPLY",p.author.handle,reply)
     if not DRY_RUN:
