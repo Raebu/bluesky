@@ -8,7 +8,7 @@ on:
         required: true
         default: engagement
         type: choice
-        options: [engagement, post]
+        options: [engagement, post, review]
       live:
         description: Perform live Bluesky writes
         required: true
@@ -16,6 +16,7 @@ on:
         type: boolean
   schedule:
     - cron: '17 8,13,18 * * *'
+    - cron: '30 17 * * 0'
 
 permissions:
   contents: read
@@ -35,7 +36,9 @@ jobs:
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.live && 'true' || 'false' }}
       STATE_FILE: ${{ runner.temp }}/bluesky-state/state.json
+      REVIEW_FILE: ${{ runner.temp }}/bluesky-state/weekly-review.md
       MAX_REPLIES_PER_RUN: '2'
+      MAX_INBOUND_REPLIES_PER_RUN: '2'
       MAX_FOLLOWS_PER_RUN: '2'
       MAX_LIKES_PER_RUN: '3'
     steps:
@@ -49,31 +52,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Runtime versions
-        run: |
-          python --version
-          pip --version
-      - name: Restore engagement memory
-        if: ${{ !((github.event_name == 'workflow_dispatch' && inputs.mode == 'post') || (github.event_name == 'schedule' && startsWith(github.event.schedule, '17 13'))) }}
+      - name: Restore agent memory
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/bluesky-state
           key: bluesky-state-${{ github.run_id }}
           restore-keys: |
             bluesky-state-
-      - name: Engage or post
+      - name: Run agent
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "post" ]; then
+          mkdir -p "$(dirname "$STATE_FILE")"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "review" ]; then
+            python review.py
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.mode }}" = "post" ]; then
             python post.py
+          elif [ "${{ github.event.schedule }}" = "30 17 * * 0" ]; then
+            python review.py
           elif [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%H)" = "13" ]; then
             python post.py
           else
-            mkdir -p "$(dirname "$STATE_FILE")"
             python agent.py
           fi
-      - name: Save engagement memory
-        if: ${{ success() && !((github.event_name == 'workflow_dispatch' && inputs.mode == 'post') || (github.event_name == 'schedule' && startsWith(github.event.schedule, '17 13'))) }}
+      - name: Save agent memory
+        if: ${{ success() }}
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/bluesky-state
           key: bluesky-state-${{ github.run_id }}
+      - name: Upload weekly review
+        if: ${{ success() && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'review') || github.event.schedule == '30 17 * * 0') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluesky-weekly-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/bluesky-state/weekly-review.md
+          retention-days: 30
