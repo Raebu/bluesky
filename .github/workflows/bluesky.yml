@@ -33,6 +33,8 @@ jobs:
       BSKY_HANDLE: mraeburn.link
       BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      BSKY_MEMORY_SHEET_ID: '1yIwJqlmgRbp1_o4MFCLHMSOOgaE3DYMd31eF43dF9bs'
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.live && 'true' || 'false' }}
       STATE_FILE: ${{ runner.temp }}/bluesky-state/state.json
