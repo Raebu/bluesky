@@ -2,27 +2,39 @@
 import os, random
 from atproto import Client
 from openai import OpenAI
+from voice import MARTIN_VOICE
 
 HANDLE = os.getenv("BSKY_HANDLE", "mraeburn.link")
 PROMPTS = [
-    "Share one practical observation about where AI automation creates real business value versus theatre.",
-    "Share one concise lesson about building software products around a real operational problem.",
-    "Share a thoughtful observation about emerging technology adoption in established organisations.",
-    "Share one useful principle for entrepreneurs deciding what to automate and what to keep human.",
-    "Share one concise technology leadership insight based on first principles; do not invent personal anecdotes."
+    "Make one specific observation about where AI automation creates real business value versus theatre. Connect the technology to an operational or commercial consequence.",
+    "Make one concise observation about building software around a real operational problem. Prefer a concrete mechanism or trade-off to general advice.",
+    "Make one thoughtful observation about emerging technology adoption in established organisations, including an implementation or second-order consequence people often overlook.",
+    "Make one useful observation for entrepreneurs deciding what to automate and what to keep human. Avoid generic productivity advice.",
+    "Make one concise technology-leadership observation from first principles. Do not invent personal experience or imply Martin has used a product unless supplied as verified context.",
+    "Identify a fashionable assumption in AI or software that deserves a more nuanced view. Challenge the assumption calmly and explain the mechanism, without rage bait.",
 ]
-VOICE = """Write as Martin Raeburn, Group Managing Director of The Raeburn Group. British English.
-Professional but human. AI, automation, software, emerging technology and entrepreneurship. Maximum 280 characters.
-No invented facts or personal anecdotes, politics, hype, engagement bait, generic motivational language, or unnecessary hashtags."""
+
 
 def main():
     ai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    r = ai.responses.create(model=os.getenv("OPENAI_MODEL", "gpt-5-mini"), input=VOICE + "\n\n" + random.choice(PROMPTS))
-    text = r.output_text.strip()[:280].rstrip()
+    task = (
+        "Write ONE standalone Bluesky post in Martin's voice. Maximum 280 characters. "
+        "It must contain a worthwhile, specific thought rather than generic thought leadership. "
+        "No hashtags by default, no engagement-bait question, no invented anecdote, and no company promotion unless directly necessary.\n\n"
+        + random.choice(PROMPTS)
+    )
+    r = ai.responses.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+        input=MARTIN_VOICE + "\n\nTASK\n" + task,
+    )
+    text = r.output_text.strip().replace("\r", "")[:280].rstrip()
     if os.getenv("DRY_RUN", "true").lower() == "true":
-        print("DRY RUN:", text); return
-    b = Client(); b.login(HANDLE, os.environ["BSKY_APP_PASSWORD"])
+        print("DRY RUN:", text)
+        return
+    b = Client()
+    b.login(HANDLE, os.environ["BSKY_APP_PASSWORD"])
     result = b.send_post(text=text, langs=["en-GB"])
     print(result.uri)
+
 
 if __name__ == "__main__": main()
