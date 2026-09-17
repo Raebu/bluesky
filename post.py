@@ -1,4 +1,4 @@
-"""Publish a useful original Bluesky post with durable memory and learning."""
+"""Publish a useful original Bluesky post with durable cross-platform memory."""
 import io,json,os,re,hashlib
 from pathlib import Path
 from atproto import Client,models
@@ -8,6 +8,7 @@ from voice import MARTIN_VOICE
 from intelligence import load_knowledge,is_duplicate,content_mix_prompt,reputation_gate_prompt
 from network_intelligence import performance_summary,series_context,self_critique_prompt
 import gdrive_memory as gm
+import semantic,policy
 HANDLE=os.getenv("BSKY_HANDLE","mraeburn.link");DRY_RUN=os.getenv("DRY_RUN","true").lower()=="true";STATE_FILE=Path(os.getenv("STATE_FILE","state.json"))
 SYSTEM=MARTIN_VOICE+r'''\nReturn ONLY valid JSON: {"text":"post","hashtags":[],"media":"none|insight_card|process_card|contrast_card","card_title":"","card_points":[],"alt_text":"","thread":[]}\nRULES: hashtags optional, 0-2 and only for discovery. Final main post <=300 chars. Media must add information, never generic decoration. thread normally empty; use 2-4 continuations only when genuinely useful. Never invent personal experience, clients, projects, transactions, outcomes, statistics or product use.'''
 def load_state():
@@ -47,15 +48,20 @@ def make_card(title,points,kind):
 def ai_json(ai,prompt):
  r=ai.responses.create(model=os.getenv("OPENAI_MODEL","gpt-5-mini"),input=prompt);raw=re.sub(r"^```(?:json)?\s*|\s*```$","",r.output_text.strip(),flags=re.I|re.S);return json.loads(raw)
 def main():
- ai=OpenAI(api_key=os.environ["OPENAI_API_KEY"]);state=load_state();local=load_knowledge();sheetfacts=gm.verified_knowledge() if gm.enabled() else [];knowledge={"repository":local,"google_sheet_verified_facts":sheetfacts};topic=content_mix_prompt(state);performance=performance_summary();series=series_context()
- recent=list(dict.fromkeys((gm.recent_posts(100) if gm.enabled() else [])+state.get("original_posts",[])))[-100:];plan=None;text=""
+ ai=OpenAI(api_key=os.environ["OPENAI_API_KEY"]);state=load_state();local=load_knowledge();sheetfacts=gm.verified_knowledge() if gm.enabled() else [];knowledge={"repository":local,"google_sheet_verified_facts":sheetfacts};topic=content_mix_prompt(state);performance=performance_summary();series=series_context();corrections=gm.corrections() if gm.enabled() else []
+ recent=list(dict.fromkeys((gm.recent_posts(100) if gm.enabled() else [])+(gm.recent_lineage_texts(300) if gm.enabled() else [])+state.get("original_posts",[])))[-300:];plan=None;text=""
+ correction_text='; '.join(str(r.get('Correct Value') or r.get('Instruction') or '') for r in corrections[-20:])
  for _ in range(3):
-  task=f"Create one original post. Content lane: {topic}. Verified knowledge: {json.dumps(knowledge)}. Existing intellectual series: {series or 'none yet'}. Performance evidence: {performance}. Use performance only as weak evidence about useful formats/topics; never chase engagement or invent conclusions from sparse data. If this lane has prior posts, advance the argument rather than restating it. Recent posts: {json.dumps(recent[-20:])}. Prefer a fresh mechanism, constraint, trade-off or second-order implication."
+  task=f"Create one original post. Content lane: {topic}. Verified knowledge: {json.dumps(knowledge)}. Human corrections: {correction_text}. Existing intellectual series: {series or 'none yet'}. Performance evidence: {performance}. Use performance only as weak evidence about useful formats/topics; never chase engagement or invent conclusions from sparse data. If this lane has prior posts, advance the argument rather than restating it. Recent posts: {json.dumps(recent[-40:])}. Prefer a fresh mechanism, constraint, trade-off or second-order implication."
   plan=ai_json(ai,SYSTEM+"\nTASK\n"+task);text=fit_post(str(plan.get("text","")),list(plan.get("hashtags") or []))
-  if text and not is_duplicate(text,recent):break
-  if gm.enabled() and text:gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected","semantic duplicate")
+  if text and not is_duplicate(text,recent) and not semantic.duplicate(text,recent,.72):break
+  if gm.enabled() and text:gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected","cross-platform semantic duplicate")
   plan=None
  if not plan or not text:return print("SKIP duplicate/weak post")
+ ok,reason=policy.gate_generated(text,"\n".join(sheetfacts))
+ if not ok:
+  if gm.enabled() and reason=='research_required':gm.research_hold(text,reason,"Bluesky original post")
+  return print("SKIP policy gate:",reason)
  critique=ai_json(ai,MARTIN_VOICE+"\n"+self_critique_prompt(text))
  if not critique or critique.get("pass") is not True:
   if gm.enabled():gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected",(critique or {}).get("reason","self critique"))
@@ -64,14 +70,17 @@ def main():
  if gate.get("publish") is not True:
   if gm.enabled():gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"rejected",gate.get("reason","reputation gate"))
   return print("SKIP reputation gate:",gate.get("reason",""))
+ if not DRY_RUN and gm.enabled() and not gm.control('Publishing Enabled',True):return print('SKIP Publishing Enabled is FALSE')
  tags=[clean_tag(x) for x in plan.get("hashtags",[]) if clean_tag(x)];media=plan.get("media","none");title=str(plan.get("card_title","")).strip();points=[str(x).strip() for x in plan.get("card_points",[]) if str(x).strip()];alt=str(plan.get("alt_text","")).strip()
  if media not in {"insight_card","process_card","contrast_card"} or not title or len(points)<2 or not alt:media="none"
  thread=[fit_post(str(x),[]) for x in (plan.get("thread") or []) if str(x).strip()][:4]
- if DRY_RUN:return print("DRY RUN TEXT:",text,"\nDRY RUN MEDIA:",media,"\nDRY RUN THREAD:",thread)
+ if DRY_RUN:
+  if gm.enabled():gm.replay('POST_CANDIDATE',{'text':text,'topic':topic},'passed policy/semantic gates',.8)
+  return print("DRY RUN TEXT:",text,"\nDRY RUN MEDIA:",media,"\nDRY RUN THREAD:",thread)
  b=Client();b.login(HANDLE,os.environ["BSKY_APP_PASSWORD"]);result=b.send_image(text=text,image=make_card(title,points,media),image_alt=alt,langs=["en-GB"]) if media!="none" else b.send_post(text=text,langs=["en-GB"]);parent=result
  for c in thread:
   pref=models.ComAtprotoRepoStrongRef.Main(uri=parent.uri,cid=parent.cid);root=models.ComAtprotoRepoStrongRef.Main(uri=result.uri,cid=result.cid);parent=b.send_post(c,reply_to=models.AppBskyFeedPost.ReplyRef(parent=pref,root=root),langs=["en-GB"])
  state.setdefault("original_posts",[]).append(text);state["original_posts"]=state["original_posts"][-100:];state.setdefault("content_topics",[]).append(topic);state["content_topics"]=state["content_topics"][-100:];save_state(state)
- if gm.enabled():gm.log_post(result.uri,text,topic,tags,media,thread);gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"published","")
+ if gm.enabled():gm.log_post(result.uri,text,topic,tags,media,thread);gm.log_content(text,topic,hashlib.sha256(text.lower().encode()).hexdigest()[:16],"published","");gm.replay('PUBLISH',{'uri':result.uri,'topic':topic},'published after shared Social OS gates',.9)
  print(result.uri)
 if __name__=="__main__":main()
